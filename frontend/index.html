@@ -348,8 +348,6 @@
       font-size: 0.88rem;
       line-height: 1.8;
       color: var(--text-mid);
-      max-height: 300px;
-      overflow-y: auto;
       margin-bottom: 20px;
     }
     .report-preview h1, .report-preview h2, .report-preview h3 {
@@ -531,7 +529,7 @@
   <footer class="footer">© 2025 Should I Open Here — Hackathon Project</footer>
 
   <script>
-    const API_BASE = "http://localhost:8000";
+    const API_BASE = "http://localhost:8001";
 
     // ── Location suggestions ──────────────────────────────────────────────────
     const SUGGESTIONS = [
@@ -719,7 +717,13 @@
         document.getElementById("report-preview").innerHTML =
           renderMarkdown(data.report_preview || "Report generated successfully.");
 
-        document.getElementById("box-link").href = data.box_link;
+        const boxBtn = document.getElementById("box-link");
+        if (data.box_link && data.box_link !== "no-box-token") {
+          boxBtn.href = data.box_link;
+          boxBtn.style.display = "";
+        } else {
+          boxBtn.style.display = "none";
+        }
 
         resultsEl.style.display = "block";
         resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });

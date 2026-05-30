@@ -77,7 +77,7 @@ async def analyze(req: AnalyzeRequest):
 
     return AnalyzeResponse(
         box_link=box_link,
-        report_preview=report_md[:600],
+        report_preview=report_md,
         location=req.location,
         business_type=req.business_type,
     )
