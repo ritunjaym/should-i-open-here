@@ -1,6 +1,34 @@
+<<<<<<< HEAD
 .env
 .rocketride/
 .env
 __pycache__/
 *.pyc
 .claude/
+=======
+# Environment variables — NEVER commit these
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+>>>>>>> 5a9b89512dccd1ca29be07543725afbbd2f71722
