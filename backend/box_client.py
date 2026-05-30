@@ -1,16 +1,14 @@
 """
-Box integration using Client Credentials Grant (CCG).
-No developer token needed — uses client_id + client_secret + enterprise_id.
+Box integration using OAuth 2.0 access + refresh tokens.
 
-Required env vars:
+Run box_auth_setup.py ONCE to populate BOX_ACCESS_TOKEN and BOX_REFRESH_TOKEN in .env.
+Tokens are auto-refreshed on expiry.
+
+Required env vars (set automatically by box_auth_setup.py):
   BOX_CLIENT_ID
   BOX_CLIENT_SECRET
-  BOX_ENTERPRISE_ID   # found in Box developer console under your app
-
-Folder structure created in Box:
-  Should I Open Here/
-    └── Reports/
-          └── <slug>_<timestamp>.md
+  BOX_ACCESS_TOKEN
+  BOX_REFRESH_TOKEN
 """
 import os
 import io
@@ -24,66 +22,106 @@ import requests
 BASE        = "https://api.box.com/2.0"
 UPLOAD_BASE = "https://upload.box.com/api/2.0"
 TOKEN_URL   = "https://api.box.com/oauth2/token"
-BOX_FOLDER_NAME    = "Should I Open Here"
-REPORTS_SUBFOLDER  = "Reports"
+ENV_FILE    = Path(__file__).parent / ".env"
 
-# Load .env the same way other modules do
-_env_file = Path(__file__).parent / ".env"
-if _env_file.exists():
-    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+BOX_FOLDER_NAME   = "Should I Open Here"
+REPORTS_SUBFOLDER = "Reports"
+
+# Load .env
+if ENV_FILE.exists():
+    for _line in ENV_FILE.read_text(encoding="utf-8").splitlines():
         _line = _line.strip()
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ[_k.strip()] = _v.strip()
 
 
-def _get_ccg_token() -> str:
-    """Obtain a Box access token via Client Credentials Grant."""
-    client_id     = os.environ.get("BOX_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("BOX_CLIENT_SECRET", "").strip()
-    enterprise_id = os.environ.get("BOX_ENTERPRISE_ID", "").strip()
-
-    missing = [k for k, v in [
-        ("BOX_CLIENT_ID", client_id),
-        ("BOX_CLIENT_SECRET", client_secret),
-        ("BOX_ENTERPRISE_ID", enterprise_id),
-    ] if not v]
-    if missing:
-        raise ValueError(f"Missing Box env vars: {', '.join(missing)}")
-
+def _refresh_tokens() -> str:
+    """Use refresh token to get a new access token; persists both back to .env."""
     r = requests.post(TOKEN_URL, data={
-        "grant_type":      "client_credentials",
-        "client_id":       client_id,
-        "client_secret":   client_secret,
-        "box_subject_type": "enterprise",
-        "box_subject_id":  enterprise_id,
+        "grant_type":    "refresh_token",
+        "refresh_token": os.environ.get("BOX_REFRESH_TOKEN", ""),
+        "client_id":     os.environ.get("BOX_CLIENT_ID", ""),
+        "client_secret": os.environ.get("BOX_CLIENT_SECRET", ""),
     })
     r.raise_for_status()
-    return r.json()["access_token"]
+    tokens = r.json()
+    new_access  = tokens["access_token"]
+    new_refresh = tokens["refresh_token"]
+
+    # Persist updated tokens to .env
+    os.environ["BOX_ACCESS_TOKEN"]  = new_access
+    os.environ["BOX_REFRESH_TOKEN"] = new_refresh
+    _update_env("BOX_ACCESS_TOKEN",  new_access)
+    _update_env("BOX_REFRESH_TOKEN", new_refresh)
+    return new_access
 
 
-def _headers() -> dict:
-    return {"Authorization": f"Bearer {_get_ccg_token()}"}
+def _update_env(key: str, value: str):
+    if not ENV_FILE.exists():
+        return
+    lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}="):
+            lines[i] = f"{key}={value}"
+            updated = True
+            break
+    if not updated:
+        lines.append(f"{key}={value}")
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _get_or_create_folder(parent_id: str, name: str, headers: dict) -> str:
-    r = requests.get(
-        f"{BASE}/folders/{parent_id}/items",
-        params={"fields": "id,name,type", "limit": 1000},
-        headers=headers,
-    )
+def _get_token() -> str:
+    return os.environ.get("BOX_ACCESS_TOKEN", "")
+
+
+def _headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _api_get(url, token, **kwargs):
+    """GET with one automatic token refresh on 401."""
+    r = requests.get(url, headers=_headers(token), **kwargs)
+    if r.status_code == 401:
+        token = _refresh_tokens()
+        r = requests.get(url, headers=_headers(token), **kwargs)
     r.raise_for_status()
+    return r, token
+
+
+def _api_post(url, token, **kwargs):
+    r = requests.post(url, headers=_headers(token), **kwargs)
+    if r.status_code == 401:
+        token = _refresh_tokens()
+        r = requests.post(url, headers=_headers(token), **kwargs)
+    r.raise_for_status()
+    return r, token
+
+
+def _api_put(url, token, **kwargs):
+    r = requests.put(url, headers=_headers(token), **kwargs)
+    if r.status_code == 401:
+        token = _refresh_tokens()
+        r = requests.put(url, headers=_headers(token), **kwargs)
+    r.raise_for_status()
+    return r, token
+
+
+def _get_or_create_folder(parent_id: str, name: str, token: str) -> tuple[str, str]:
+    r, token = _api_get(
+        f"{BASE}/folders/{parent_id}/items", token,
+        params={"fields": "id,name,type", "limit": 1000},
+    )
     for item in r.json().get("entries", []):
         if item["type"] == "folder" and item["name"] == name:
-            return item["id"]
+            return item["id"], token
 
-    r = requests.post(
-        f"{BASE}/folders",
+    r, token = _api_post(
+        f"{BASE}/folders", token,
         json={"name": name, "parent": {"id": parent_id}},
-        headers=headers,
     )
-    r.raise_for_status()
-    return r.json()["id"]
+    return r.json()["id"], token
 
 
 def _safe_filename(location: str, business_type: str) -> str:
@@ -94,40 +132,32 @@ def _safe_filename(location: str, business_type: str) -> str:
 
 
 def _upload_sync(report_md: str, location: str, business_type: str) -> str:
-    headers = _headers()   # single token for the whole upload
+    token = _get_token()
 
-    parent_id  = _get_or_create_folder("0", BOX_FOLDER_NAME, headers)
-    reports_id = _get_or_create_folder(parent_id, REPORTS_SUBFOLDER, headers)
+    parent_id,  token = _get_or_create_folder("0", BOX_FOLDER_NAME, token)
+    reports_id, token = _get_or_create_folder(parent_id, REPORTS_SUBFOLDER, token)
 
     filename     = _safe_filename(location, business_type)
     file_content = report_md.encode("utf-8")
 
-    r = requests.post(
-        f"{UPLOAD_BASE}/files/content",
-        headers=headers,
+    r, token = _api_post(
+        f"{UPLOAD_BASE}/files/content", token,
         data={"attributes": f'{{"name":"{filename}","parent":{{"id":"{reports_id}"}}}}'},
         files={"file": (filename, io.BytesIO(file_content), "text/markdown")},
     )
-    r.raise_for_status()
     file_id = r.json()["entries"][0]["id"]
 
-    r = requests.put(
-        f"{BASE}/files/{file_id}",
+    r, _ = _api_put(
+        f"{BASE}/files/{file_id}", token,
         json={"shared_link": {"access": "open"}},
-        headers={**headers, "Content-Type": "application/json"},
         params={"fields": "shared_link"},
     )
-    r.raise_for_status()
     return r.json()["shared_link"]["url"]
 
 
 async def upload_report_to_box(report_md: str, location: str, business_type: str) -> str:
-    """Upload report to Box via CCG auth. Returns shareable link or 'no-box-token'."""
-    if not all([
-        os.environ.get("BOX_CLIENT_ID"),
-        os.environ.get("BOX_CLIENT_SECRET"),
-        os.environ.get("BOX_ENTERPRISE_ID"),
-    ]):
+    """Upload report to Box and return a shareable link. Returns 'no-box-token' if not configured."""
+    if not os.environ.get("BOX_ACCESS_TOKEN") or not os.environ.get("BOX_REFRESH_TOKEN"):
         return "no-box-token"
 
     loop = asyncio.get_event_loop()
