@@ -3,8 +3,8 @@
 Restaurant location viability agent.
 
 Usage:
-    python agent.py <input.md>     # parse → score → LLM → writes report.md
-    python agent.py --mock         # parse + score sample_input.md, print signals, no API call
+    python agent.py <input.json> --address ADDR --day DAY --open HH:MM --close HH:MM --search TERM
+    python agent.py --mock      # score sample_input.json with demo args, no API call
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from prompts import SYSTEM_PROMPT
 def _normalize_str(s: str) -> str:
     return (
         s.replace(" ", " ")   # narrow no-break space → regular space
-         .replace("ç", "ç")   # already ç, but round-trip safe
          .replace("’", "'")   # right single quotation mark
          .replace("‘", "'")   # left single quotation mark
     )
@@ -42,67 +41,90 @@ def _normalize_obj(obj):
     return obj
 
 
-# ── Markdown parsing ──────────────────────────────────────────────────────────
+# ── Traffic timestamp parsing ─────────────────────────────────────────────────
 
-def _extract_json_blocks(md_text: str) -> list:
-    """Return all successfully parsed objects/arrays from ```json … ``` fences."""
-    blocks = []
-    for m in re.finditer(r"```json\s*([\s\S]*?)\s*```", md_text, re.IGNORECASE):
-        try:
-            blocks.append(json.loads(m.group(1)))
-        except json.JSONDecodeError:
-            pass  # skip malformed blocks
-    return blocks
-
-
-def _identify_blocks(blocks: list) -> tuple[dict | None, list | None, list | None]:
+def _parse_traffic_timestamp(ts: str) -> int | None:
     """
-    Heuristically identify user_request, traffic_data, competitors from parsed blocks.
-    Identification is by structure, not position — order in the file does not matter.
+    Parse a datetime string like '2026-05-30 11:00 AM PDT' → integer hour (0–23).
+    Also handles '2026-05-30 13:00 PDT' (24h) and bare 'HH:MM AM/PM'.
     """
-    user_request = traffic_data = competitors = None
+    s = ts.strip()
+    # 24-hour: 'YYYY-MM-DD HH:MM ...' where HH >= 10 (no AM/PM needed)
+    m = re.search(r"\b(\d{2}):(\d{2})\b(?!\s*[AP]M)", s, re.IGNORECASE)
+    if m and int(m.group(1)) >= 10:   # avoid matching 10:00 AM as 24h
+        pass  # fall through to AM/PM check first
+    # AM/PM form: '11:00 AM', '1:00 PM', '12:30 AM'
+    m = re.search(r"(\d{1,2}):(\d{2})\s*(AM|PM)", s, re.IGNORECASE)
+    if m:
+        h = int(m.group(1))
+        period = m.group(3).upper()
+        if period == "PM" and h != 12:
+            h += 12
+        elif period == "AM" and h == 12:
+            h = 0
+        return h
+    # 24-hour fallback: 'YYYY-MM-DD HH:MM'
+    m = re.search(r"\b(\d{2}):(\d{2})\b", s)
+    if m:
+        return int(m.group(1))
+    return None
 
-    for block in blocks:
-        if isinstance(block, dict):
-            # User request: has address + day_of_the_week keys
-            if "address" in block and "day_of_the_week" in block:
-                user_request = block
-        elif isinstance(block, list) and block and isinstance(block[0], dict):
-            first = block[0]
-            if "hour" in first or "speed_summary" in first:
-                traffic_data = block
-            elif any(k in first for k in ("title", "totalScore", "reviewsCount")):
-                competitors = block
+
+def _normalize_traffic(aggregated_traffic: dict) -> list:
+    """
+    Convert the aggregated_traffic dict ('2026-05-30 11:00 AM PDT' → {…counts…})
+    into the list-of-{hour, speed_summary} form that scoring.py expects.
+    Duplicate hours are last-write-wins.
+    """
+    by_hour: dict[int, dict] = {}
+    for ts, summary in aggregated_traffic.items():
+        if not isinstance(summary, dict):
+            continue
+        hour = _parse_traffic_timestamp(str(ts))
+        if hour is not None:
+            by_hour[hour] = summary
+    return [{"hour": h, "speed_summary": s} for h, s in sorted(by_hour.items())]
+
+
+# ── JSON file parsing ─────────────────────────────────────────────────────────
+
+def _load_and_parse(
+    json_path: Path, user_request: dict
+) -> tuple[dict, list, list]:
+    """
+    Read the JSON input file, extract google_maps_places and aggregated_traffic,
+    normalise unicode, and return (user_request, traffic_data, competitors).
+    """
+    raw = json.loads(json_path.read_text(encoding="utf-8"))
+    data = _normalize_obj(raw)
+
+    competitors = data.get("google_maps_places", [])
+    if not isinstance(competitors, list):
+        competitors = []
+
+    traffic_raw = data.get("aggregated_traffic", {})
+    if not isinstance(traffic_raw, dict):
+        traffic_raw = {}
+    traffic_data = _normalize_traffic(traffic_raw)
 
     return user_request, traffic_data, competitors
 
 
-def _load_and_parse(md_path: Path) -> tuple[dict, list, list]:
-    """
-    Read the markdown file, extract JSON blocks, normalise unicode,
-    and return (user_request, traffic_data, competitors).
-    Raises ValueError if the user-request block is missing.
-    """
-    md_text = md_path.read_text(encoding="utf-8")
-    raw_blocks = _extract_json_blocks(md_text)
-    blocks = [_normalize_obj(b) for b in raw_blocks]
-
-    user_request, traffic_data, competitors = _identify_blocks(blocks)
-
-    if user_request is None:
-        raise ValueError(
-            f"No user-request block found in {md_path}. "
-            "Expected a JSON object with 'address' and 'day_of_the_week' keys."
-        )
-
-    return user_request, traffic_data or [], competitors or []
+def _build_user_request(args: argparse.Namespace) -> dict:
+    return {
+        "address": args.address,
+        "day_of_the_week": args.day,
+        "opening_time": args.open,
+        "closing_time": args.close,
+        "search_term": args.search,
+    }
 
 
 # ── LLM call (isolated — swap provider here) ─────────────────────────────────
 
 def call_llm(system_prompt: str, user_message: str) -> str:
     """
-    Call the Anthropic API with the given prompts and return the assistant text.
+    Call the Anthropic API and return the assistant text.
     Swap provider by replacing this function's body only.
     """
     try:
@@ -126,30 +148,47 @@ def call_llm(system_prompt: str, user_message: str) -> str:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def generate_report(input_md_path: str) -> str:
+def generate_report(json_path: str, user_request: dict) -> str:
     """
-    Full pipeline: parse → compute signals → LLM → write report.
-    Returns the path to the written report.md.
+    Full pipeline: parse JSON → compute signals → LLM → write report.md.
+    Returns the path to the written report.
     """
-    md_path = Path(input_md_path)
-    user_request, traffic_data, competitors = _load_and_parse(md_path)
+    path = Path(json_path)
+    ur, traffic_data, competitors = _load_and_parse(path, user_request)
 
-    signals = compute_signals(user_request, traffic_data, competitors)
+    signals = compute_signals(ur, traffic_data, competitors)
 
     user_message = json.dumps(
-        {"user_request": user_request, "signals": signals},
+        {"user_request": ur, "signals": signals},
         indent=2,
         ensure_ascii=False,
     )
 
     report_md = call_llm(SYSTEM_PROMPT, user_message)
 
-    output_path = md_path.parent / "report.md"
+    output_path = path.parent / "report.md"
     output_path.write_text(report_md, encoding="utf-8")
     return str(output_path)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
+
+_MOCK_DEFAULTS = {
+    "address": "411 15th Ave E, Seattle, WA 98112",
+    "day": "Saturday",
+    "open": "11:00",
+    "close": "23:00",
+    "search": "vegan restaurant",
+}
+
+
+def _add_location_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--address", help="Street address of the candidate location")
+    parser.add_argument("--day",     help="Day of the week (e.g. Saturday)")
+    parser.add_argument("--open",    dest="open",  help="Opening time in HH:MM (24h)")
+    parser.add_argument("--close",   dest="close", help="Closing time in HH:MM (24h)")
+    parser.add_argument("--search",  help='Search term (e.g. "vegan restaurant")')
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -157,31 +196,47 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python agent.py sample_input.md       # full run\n"
-            "  python agent.py --mock                # scoring only, no API call\n"
+            '  python agent.py real_input.json --address "411 15th Ave E, Seattle, WA 98112" \\\n'
+            "    --day Saturday --open 11:00 --close 23:00 --search \"vegan restaurant\"\n"
+            "  python agent.py --mock\n"
         ),
     )
-    parser.add_argument("input", nargs="?", help="Path to input markdown file")
+    parser.add_argument("input", nargs="?", help="Path to input JSON file")
     parser.add_argument(
         "--mock",
         action="store_true",
-        help="Parse + score sample_input.md without calling the API; prints signals as JSON",
+        help=(
+            "Parse + score sample_input.json with demo location args; "
+            "prints signals as JSON without calling the API"
+        ),
     )
+    _add_location_args(parser)
     args = parser.parse_args()
 
     if args.mock:
-        sample = Path(__file__).parent / "sample_input.md"
+        sample = Path(__file__).parent / "sample_input.json"
         if not sample.exists():
-            sys.exit(f"sample_input.md not found at {sample}")
-        user_request, traffic_data, competitors = _load_and_parse(sample)
+            sys.exit(f"sample_input.json not found at {sample}")
+        # Fill unset args with mock defaults
+        for field, default in _MOCK_DEFAULTS.items():
+            if getattr(args, field, None) is None:
+                setattr(args, field, default)
+        user_request = _build_user_request(args)
+        _, traffic_data, competitors = _load_and_parse(sample, user_request)
         signals = compute_signals(user_request, traffic_data, competitors)
         print(json.dumps(signals, indent=2, ensure_ascii=False))
         return
 
     if not args.input:
-        parser.error("Provide an input .md file path, or use --mock")
+        parser.error("Provide an input JSON file path, or use --mock")
 
-    output_path = generate_report(args.input)
+    missing = [f"--{f}" for f in ("address", "day", "open", "close", "search")
+               if not getattr(args, f.replace("-", "_"), None)]
+    if missing:
+        parser.error(f"The following args are required: {', '.join(missing)}")
+
+    user_request = _build_user_request(args)
+    output_path = generate_report(args.input, user_request)
     print(f"Report written to: {output_path}")
 
 
