@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import uvicorn
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env")
 
 from scraper import scrape_location
 from report_agent import generate_report
@@ -74,7 +77,7 @@ async def analyze(req: AnalyzeRequest):
 
     return AnalyzeResponse(
         box_link=box_link,
-        report_preview=report_md[:300],
+        report_preview=report_md[:600],
         location=req.location,
         business_type=req.business_type,
     )

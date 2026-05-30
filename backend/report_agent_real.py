@@ -1,102 +1,115 @@
 """
-Bridge between Person C's backend and Person B's agent.
+Bridge between Person C's backend and Person B's updated agent.
 
-Person B's agent expects a markdown file with three JSON fences.
-This module converts the scraper dict → temp markdown file → calls agent → returns report.
+New agent.py interface (as of latest commit):
+  generate_report(json_path: str, user_request: dict) -> str  # returns path to report.md
+
+Input JSON must match Apify's output format:
+  {
+    "google_maps_places": [ {title, totalScore, reviewsCount, categories, openingHours, ...} ],
+    "aggregated_traffic":  { "<timestamp>": {Free Flow, Slow Traffic, ...}, ... }
+  }
 """
-import json
-import sys
-import os
-import tempfile
-from pathlib import Path
+from __future__ import annotations
 
-# Person B's agent lives one level up
+import asyncio
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+# Parse .env directly and inject into os.environ before importing agent
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ[_k.strip()] = _v.strip()
+
+# Person B's agent lives one level up from backend/
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from agent import call_llm, _load_and_parse, compute_signals
-from prompts import SYSTEM_PROMPT
-from scoring import compute_signals
+from agent import generate_report as _agent_generate_report  # noqa: E402
 
 
 async def generate(scrape_data: dict) -> str:
-    """
-    Convert scraper dict to Person B's markdown format,
-    run through their scoring + LLM pipeline, return report markdown.
-    """
-    import asyncio
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _generate_sync, scrape_data)
 
 
 def _generate_sync(scrape_data: dict) -> str:
-    # Build the markdown input Person B's agent expects
     user_request = {
-        "address": scrape_data.get("location", ""),
+        "address":        scrape_data.get("location", ""),
         "day_of_the_week": scrape_data.get("day_of_week", "Saturday"),
-        "opening_time": scrape_data.get("opening_time", "09:00"),
-        "closing_time": scrape_data.get("closing_time", "22:00"),
-        "search_term": scrape_data.get("business_type", ""),
+        "opening_time":   scrape_data.get("opening_time", "09:00"),
+        "closing_time":   scrape_data.get("closing_time", "22:00"),
+        "search_term":    scrape_data.get("business_type", ""),
     }
 
-    # Convert competitors to Person B's schema
-    competitors = [
-        {
-            "title": c.get("name", "Unknown"),
-            "totalScore": c.get("rating", 0),
-            "reviewsCount": c.get("review_count", 0),
-            "categories": [scrape_data.get("business_type", "")],
-            "openingHours": [],
-            "rank": i + 1,
-        }
-        for i, c in enumerate(scrape_data.get("competitors", []))
-    ]
-
-    # Use real hourly traffic if available (from scraper_real), else fall back to proxy
-    if scrape_data.get("hourly_traffic"):
-        traffic_data = scrape_data["hourly_traffic"]
+    # ── Build google_maps_places in Apify schema ──────────────────────────────
+    # scraper_real returns the full Apify places list under "raw_places";
+    # scraper mock returns competitors in the simplified schema — handle both.
+    raw_places = scrape_data.get("raw_places")
+    if raw_places:
+        google_maps_places = raw_places
     else:
-        traffic_map = {"low": 20, "moderate": 40, "high": 65, "very high": 85}
-        free_flow = traffic_map.get(scrape_data.get("foot_traffic", "moderate"), 40)
-        traffic_data = [
-            {"hour": h, "speed_summary": {"Free Flow": free_flow, "Slow Traffic": 100 - free_flow}}
-            for h in range(9, 23)
+        google_maps_places = [
+            {
+                "rank":         i + 1,
+                "title":        c.get("name", "Unknown"),
+                "address":      "",
+                "totalScore":   c.get("rating", 0.0),
+                "reviewsCount": c.get("review_count", 0),
+                "categories":   [scrape_data.get("business_type", "")],
+                "openingHours": [],
+            }
+            for i, c in enumerate(scrape_data.get("competitors", []))
         ]
 
-    # Write to temp markdown file and call Person B's pipeline
-    md_content = f"""# Location Analysis Input
+    # ── Build aggregated_traffic in Apify schema ──────────────────────────────
+    # scraper_real stores real hourly traffic under "hourly_traffic";
+    # convert list[{hour, speed_summary}] → {"YYYY-MM-DD HH:MM AM/PM": {…}}
+    aggregated_traffic: dict = {}
+    today = datetime.now().strftime("%Y-%m-%d")
 
-## User Request
+    hourly = scrape_data.get("hourly_traffic") or []
+    if hourly:
+        for entry in hourly:
+            h = entry.get("hour", 0)
+            period = "AM" if h < 12 else "PM"
+            display_h = h if h <= 12 else h - 12
+            display_h = display_h or 12
+            ts = f"{today} {display_h:02d}:00 {period}"
+            aggregated_traffic[ts] = entry.get("speed_summary", {})
+    else:
+        # Fall back: synthesise from the foot_traffic string
+        traffic_map = {"low": 20, "moderate": 40, "high": 65, "very high": 85}
+        free_flow = traffic_map.get(scrape_data.get("foot_traffic", "moderate"), 40)
+        for h in range(9, 23):
+            period = "AM" if h < 12 else "PM"
+            display_h = h if h <= 12 else h - 12
+            display_h = display_h or 12
+            ts = f"{today} {display_h:02d}:00 {period}"
+            aggregated_traffic[ts] = {
+                "Free Flow": free_flow,
+                "Slow Traffic": 100 - free_flow,
+            }
 
-```json
-{json.dumps(user_request, indent=2)}
-```
+    apify_json = {
+        "google_maps_places": google_maps_places,
+        "aggregated_traffic": aggregated_traffic,
+    }
 
-## Hourly Traffic Data
-
-```json
-{json.dumps(traffic_data, indent=2)}
-```
-
-## Competitors
-
-```json
-{json.dumps(competitors, indent=2)}
-```
-"""
-
+    # ── Write temp JSON file and call agent.generate_report ──────────────────
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", delete=False, encoding="utf-8"
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
     ) as f:
-        f.write(md_content)
+        json.dump(apify_json, f, indent=2, ensure_ascii=False)
         tmp_path = f.name
 
     try:
-        user_req, traffic, comps = _load_and_parse(Path(tmp_path))
-        signals = compute_signals(user_req, traffic, comps)
-        user_message = json.dumps(
-            {"user_request": user_req, "signals": signals},
-            indent=2,
-            ensure_ascii=False,
-        )
-        return call_llm(SYSTEM_PROMPT, user_message)
+        report_path = _agent_generate_report(tmp_path, user_request)
+        return Path(report_path).read_text(encoding="utf-8")
     finally:
         os.unlink(tmp_path)
