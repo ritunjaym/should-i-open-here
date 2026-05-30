@@ -148,7 +148,8 @@ def _parse_opening_hours_for_day(
             return []
         ranges: list[tuple[int, int]] = []
         for segment in hours_str.split(","):
-            parts = re.split(r"\s+to\s+", segment.strip(), maxsplit=1, flags=re.IGNORECASE)
+            # Handle "11 AM to 9 PM" (sample data) AND "11 AM–9 PM" / "11 AM - 9 PM" (Apify)
+            parts = re.split(r"\s+to\s+|[–—]\s*|\s+-\s+", segment.strip(), maxsplit=1, flags=re.IGNORECASE)
             if len(parts) != 2:
                 continue
             open_h = _parse_hour_12(parts[0].strip())

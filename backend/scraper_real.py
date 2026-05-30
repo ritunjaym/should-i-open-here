@@ -18,6 +18,16 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path as _Path
+
+# Inject .env into os.environ before any API clients are initialised
+_env_file = _Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ[_k.strip()] = _v.strip()
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Optional
