@@ -1,0 +1,32 @@
+{
+  "$comment": "Shared contract between Person A (scraper), Person B (report agent), Person C (backend). All parties build against this shape.",
+  "scraper_output": {
+    "location": "123 Main St, Seattle",
+    "business_type": "coffee shop",
+    "lat": 47.6062,
+    "lng": -122.3321,
+    "competitors": [
+      {
+        "name": "Starbucks",
+        "distance_m": 200,
+        "rating": 4.2,
+        "review_count": 1840
+      }
+    ],
+    "foot_traffic": "high",
+    "nearby_pois": ["Pike Place Market", "Seattle Central Library"]
+  },
+  "analyze_request": {
+    "location": "123 Main St, Seattle",
+    "business_type": "coffee shop",
+    "lat": 47.6062,
+    "lng": -122.3321
+  },
+  "analyze_response": {
+    "box_link": "https://app.box.com/s/example",
+    "report_preview": "# Location Analysis...",
+    "location": "123 Main St, Seattle",
+    "business_type": "coffee shop"
+  },
+  "foot_traffic_values": ["low", "moderate", "high", "very high"]
+}
