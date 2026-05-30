@@ -366,8 +366,10 @@ def compute_signals(
     for comp in competitors:
         ranges = _parse_opening_hours_for_day(comp.get("openingHours", []), day)
         competitor_hours_that_day.append({
-            "name": comp.get("title", "Unknown"),
-            "hours_today": _format_ranges(ranges) if ranges else "Closed / unknown",
+            "name":         comp.get("title", "Unknown"),
+            "rating":       comp.get("totalScore"),
+            "review_count": comp.get("reviewsCount"),
+            "hours_today":  _format_ranges(ranges) if ranges else "Closed / unknown",
         })
         for h in window_hours:
             if _is_open_at_hour(ranges, h):
