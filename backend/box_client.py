@@ -98,7 +98,12 @@ async def upload_report_to_box(
     location: str,
     business_type: str,
 ) -> str:
-    """Upload markdown report to Box and return a shareable link URL."""
+    """Upload markdown report to Box and return a shareable link URL.
+    Falls back gracefully if BOX_DEVELOPER_TOKEN is not configured."""
+    token = os.environ.get("BOX_DEVELOPER_TOKEN", "").strip()
+    if not token or token.startswith("PASTE_") or token == "your_developer_token_here":
+        return "no-box-token"
+
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, _upload_sync, report_md, location, business_type
