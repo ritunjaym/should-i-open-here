@@ -31,9 +31,9 @@ def _generate_sync(scrape_data: dict) -> str:
     # Build the markdown input Person B's agent expects
     user_request = {
         "address": scrape_data.get("location", ""),
-        "day_of_the_week": "Saturday",  # default; Person A can enrich later
-        "opening_time": "09:00",
-        "closing_time": "22:00",
+        "day_of_the_week": scrape_data.get("day_of_week", "Saturday"),
+        "opening_time": scrape_data.get("opening_time", "09:00"),
+        "closing_time": scrape_data.get("closing_time", "22:00"),
         "search_term": scrape_data.get("business_type", ""),
     }
 
@@ -50,13 +50,16 @@ def _generate_sync(scrape_data: dict) -> str:
         for i, c in enumerate(scrape_data.get("competitors", []))
     ]
 
-    # Build minimal hourly traffic from foot_traffic proxy
-    traffic_map = {"low": 20, "moderate": 40, "high": 65, "very high": 85}
-    free_flow = traffic_map.get(scrape_data.get("foot_traffic", "moderate"), 40)
-    traffic_data = [
-        {"hour": h, "speed_summary": {"Free Flow": free_flow, "Slow Traffic": 100 - free_flow}}
-        for h in range(9, 23)
-    ]
+    # Use real hourly traffic if available (from scraper_real), else fall back to proxy
+    if scrape_data.get("hourly_traffic"):
+        traffic_data = scrape_data["hourly_traffic"]
+    else:
+        traffic_map = {"low": 20, "moderate": 40, "high": 65, "very high": 85}
+        free_flow = traffic_map.get(scrape_data.get("foot_traffic", "moderate"), 40)
+        traffic_data = [
+            {"hour": h, "speed_summary": {"Free Flow": free_flow, "Slow Traffic": 100 - free_flow}}
+            for h in range(9, 23)
+        ]
 
     # Write to temp markdown file and call Person B's pipeline
     md_content = f"""# Location Analysis Input

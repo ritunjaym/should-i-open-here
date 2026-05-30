@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Should I Open Here?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #f5f0e8;
+      --bg2:         #ede8dc;
+      --surface:     #faf7f2;
+      --surface2:    #f0ebe0;
+      --border:      #d9d0be;
+      --border-dark: #bfb49e;
+      --accent:      #8b7355;
+      --accent-dark: #6b5840;
+      --accent-dim:  rgba(139, 115, 85, 0.10);
+      --text:        #2c2416;
+      --text-mid:    #5a4e3c;
+      --text-muted:  #8c7f6a;
+      --green:       #4a7c59;
+      --red:         #9b3a3a;
+      --radius:      4px;
+    }
+
+    body {
+      font-family: "Jost", -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 60px 20px 80px;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 0 0;
+      margin-bottom: 56px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 20px;
+    }
+    .topbar .wordmark {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--accent-dark);
+      text-transform: uppercase;
+    }
+    .topbar .pill {
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border: 1px solid var(--border-dark);
+      padding: 4px 12px;
+      border-radius: 999px;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      margin-bottom: 52px;
+      margin-top: 48px;
+      width: 100%;
+      max-width: 680px;
+    }
+    .header .eyebrow {
+      font-size: 0.88rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 18px;
+    }
+    .header h1 {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: clamp(2.4rem, 5vw, 3.6rem);
+      font-weight: 500;
+      line-height: 1.1;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .header h1 em {
+      font-style: italic;
+      color: var(--accent);
+    }
+    .header .tagline {
+      margin-top: 16px;
+      color: var(--text-muted);
+      font-size: 0.92rem;
+      font-weight: 300;
+      letter-spacing: 0.02em;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    .card-title {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-mid);
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Form ── */
+    .form-group { margin-bottom: 22px; }
+    label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 7px;
+    }
+
+    /* Autocomplete wrapper */
+    .input-wrap { position: relative; }
+    .input-wrap input { padding-right: 36px; }
+
+    input, select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: "Jost", sans-serif;
+      font-size: 0.95rem;
+      font-weight: 400;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 0.2s, background 0.2s;
+      -webkit-appearance: none;
+    }
+    input::placeholder { color: var(--text-muted); }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      background: var(--surface);
+    }
+    select option { background: var(--surface); }
+
+    /* ── Suggestions dropdown ── */
+    .suggestions {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border-dark);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 24px rgba(44, 36, 22, 0.10);
+      z-index: 100;
+      overflow: hidden;
+      display: none;
+    }
+    .suggestions.open { display: block; }
+    .suggestion-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 14px;
+      font-size: 0.9rem;
+      color: var(--text-mid);
+      cursor: pointer;
+      transition: background 0.12s;
+      border-bottom: 1px solid var(--border);
+    }
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-item:hover, .suggestion-item.highlighted {
+      background: var(--accent-dim);
+      color: var(--text);
+    }
+    .suggestion-item .sug-icon {
+      font-size: 0.8rem;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .suggestion-item .sug-label { flex: 1; }
+    .suggestion-item .sug-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 300;
+    }
+
+    .row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 28px 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-label::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Button ── */
+    .btn-primary {
+      width: 100%;
+      padding: 15px;
+      background: var(--accent-dark);
+      color: #faf7f2;
+      border: none;
+      border-radius: var(--radius);
+      font-family: "Jost", sans-serif;
+      font-size: 0.82rem;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      margin-top: 8px;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.99); }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* ── Loading ── */
+    #loading {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      padding: 28px 0 8px;
+      text-align: center;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 2px solid var(--border-dark);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+      max-width: 320px;
+      text-align: left;
+    }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.82rem;
+      font-weight: 300;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      transition: color 0.3s;
+    }
+    .step.active { color: var(--text-mid); }
+    .step.done { color: var(--green); }
+    .step-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--border-dark);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .step.active .step-dot { background: var(--accent); }
+    .step.done .step-dot { background: var(--green); }
+
+    /* ── Results ── */
+    #results {
+      display: none;
+      margin-top: 24px;
+      width: 100%;
+      max-width: 680px;
+    }
+    .result-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .result-header h2 {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 1.5rem;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .badge {
+      font-size: 0.65rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: 2px;
+    }
+    .report-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .tag {
+      font-size: 0.75rem;
+      font-weight: 400;
+      padding: 4px 12px;
+      border: 1px solid var(--border-dark);
+      color: var(--text-mid);
+      border-radius: 2px;
+    }
+    .report-preview {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 24px;
+      font-size: 0.88rem;
+      line-height: 1.8;
+      color: var(--text-mid);
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+    .report-preview h1, .report-preview h2, .report-preview h3 {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-weight: 600;
+      margin: 14px 0 5px;
+      color: var(--accent-dark);
+    }
+    .btn-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 15px;
+      background: transparent;
+      border: 1px solid var(--accent-dark);
+      color: var(--accent-dark);
+      font-family: "Jost", sans-serif;
+      font-size: 0.82rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-box:hover { background: var(--accent-dim); }
+    .btn-again {
+      margin-top: 10px;
+      width: 100%;
+      padding: 12px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-family: "Jost", sans-serif;
+      font-size: 0.8rem;
+      font-weight: 400;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-again:hover { border-color: var(--border-dark); color: var(--text-mid); }
+
+    /* ── Error ── */
+    #error-banner {
+      display: none;
+      background: rgba(155, 58, 58, 0.07);
+      border: 1px solid rgba(155, 58, 58, 0.3);
+      padding: 12px 16px;
+      color: var(--red);
+      font-size: 0.85rem;
+      margin-top: 16px;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 64px;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--border-dark);
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <p class="eyebrow">Should I Open Here?</p>
+    <h1>Find your <em>perfect</em> location</h1>
+    <p class="tagline">AI-generated reports on competitor density, foot traffic, and market opportunity — saved to Box.</p>
+  </header>
+
+  <!-- Input Card -->
+  <div class="card" id="form-card">
+    <div class="card-title">Property Details</div>
+    <form id="analyze-form">
+
+      <div class="form-group">
+        <label for="location">Address / Location</label>
+        <div class="input-wrap">
+          <input
+            id="location"
+            type="text"
+            placeholder="Enter city, address, or landmark"
+            required
+            autocomplete="off"
+          />
+          <div class="suggestions" id="location-suggestions"></div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="business-type">Business Type</label>
+        <input
+          id="business-type"
+          type="text"
+          placeholder="e.g. coffee shop, gym, restaurant"
+          required
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="section-label">Operating Hours</div>
+
+      <div class="form-group">
+        <label for="day-of-week">Day of Week</label>
+        <select id="day-of-week">
+          <option value="">Any day</option>
+          <option>Monday</option>
+          <option>Tuesday</option>
+          <option>Wednesday</option>
+          <option>Thursday</option>
+          <option>Friday</option>
+          <option>Saturday</option>
+          <option>Sunday</option>
+        </select>
+      </div>
+
+      <div class="row-2">
+        <div class="form-group">
+          <label for="opening-time">Opening Time</label>
+          <input id="opening-time" type="time" value="09:00" />
+        </div>
+        <div class="form-group">
+          <label for="closing-time">Closing Time</label>
+          <input id="closing-time" type="time" value="17:00" />
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary" id="submit-btn">
+        Generate Analysis Report
+      </button>
+
+    </form>
+
+    <div id="loading">
+      <div class="spinner"></div>
+      <div class="loading-steps">
+        <div class="step" id="step-scrape">
+          <div class="step-dot"></div>
+          <span>Scraping competitor &amp; traffic data…</span>
+        </div>
+        <div class="step" id="step-report">
+          <div class="step-dot"></div>
+          <span>Generating AI analysis report…</span>
+        </div>
+        <div class="step" id="step-box">
+          <div class="step-dot"></div>
+          <span>Saving report to Box…</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="error-banner"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results">
+    <div class="card">
+      <div class="result-header">
+        <h2>Analysis Complete</h2>
+        <span class="badge">Report Ready</span>
+      </div>
+      <div class="report-meta" id="report-meta"></div>
+      <div class="report-preview" id="report-preview"></div>
+      <a class="btn-box" id="box-link" href="#" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Open Full Report in Box
+      </a>
+      <button class="btn-again" id="btn-again">Analyze another location</button>
+    </div>
+  </div>
+
+  <footer class="footer">© 2025 Should I Open Here — Hackathon Project</footer>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    // ── Location suggestions ──────────────────────────────────────────────────
+    const SUGGESTIONS = [
+      { label: "Seattle, WA",      sub: "Pacific Northwest",      value: "Seattle, WA" },
+      { label: "New York, NY",     sub: "East Coast",             value: "New York, NY" },
+      { label: "Atlanta, GA",      sub: "Southeast",              value: "Atlanta, GA" },
+      { label: "San Francisco, CA",sub: "Bay Area",               value: "San Francisco, CA" },
+      { label: "Austin, TX",       sub: "South Central",          value: "Austin, TX" },
+      { label: "Chicago, IL",      sub: "Midwest",                value: "Chicago, IL" },
+      { label: "Los Angeles, CA",  sub: "Southern California",    value: "Los Angeles, CA" },
+      { label: "Miami, FL",        sub: "Southeast",              value: "Miami, FL" },
+      { label: "Denver, CO",       sub: "Mountain West",          value: "Denver, CO" },
+      { label: "Boston, MA",       sub: "New England",            value: "Boston, MA" },
+      { label: "Nashville, TN",    sub: "Mid-South",              value: "Nashville, TN" },
+      { label: "Portland, OR",     sub: "Pacific Northwest",      value: "Portland, OR" },
+    ];
+
+    const locationInput = document.getElementById("location");
+    const suggestionsEl = document.getElementById("location-suggestions");
+    let highlightIdx = -1;
+    let filtered = [];
+
+    function renderSuggestions(items) {
+      filtered = items;
+      highlightIdx = -1;
+      if (!items.length) { suggestionsEl.classList.remove("open"); return; }
+      suggestionsEl.innerHTML = items.map((s, i) =>
+        `<div class="suggestion-item" data-idx="${i}">
+          <span class="sug-icon">◈</span>
+          <span class="sug-label">${s.label}</span>
+          <span class="sug-sub">${s.sub}</span>
+        </div>`
+      ).join("");
+      suggestionsEl.classList.add("open");
+    }
+
+    function pickSuggestion(value) {
+      locationInput.value = value;
+      suggestionsEl.classList.remove("open");
+      filtered = [];
+      highlightIdx = -1;
+    }
+
+    locationInput.addEventListener("input", () => {
+      const q = locationInput.value.trim().toLowerCase();
+      if (!q) { renderSuggestions(SUGGESTIONS); return; }
+      renderSuggestions(SUGGESTIONS.filter(s =>
+        s.label.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q)
+      ));
+    });
+
+    locationInput.addEventListener("focus", () => {
+      const q = locationInput.value.trim().toLowerCase();
+      renderSuggestions(q
+        ? SUGGESTIONS.filter(s => s.label.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q))
+        : SUGGESTIONS
+      );
+    });
+
+    locationInput.addEventListener("keydown", (e) => {
+      if (!suggestionsEl.classList.contains("open")) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        highlightIdx = Math.min(highlightIdx + 1, filtered.length - 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        highlightIdx = Math.max(highlightIdx - 1, -1);
+      } else if (e.key === "Enter" && highlightIdx >= 0) {
+        e.preventDefault();
+        pickSuggestion(filtered[highlightIdx].value);
+        return;
+      } else if (e.key === "Escape") {
+        suggestionsEl.classList.remove("open"); return;
+      }
+      // Update highlighted item
+      suggestionsEl.querySelectorAll(".suggestion-item").forEach((el, i) => {
+        el.classList.toggle("highlighted", i === highlightIdx);
+      });
+    });
+
+    suggestionsEl.addEventListener("mousedown", (e) => {
+      const item = e.target.closest(".suggestion-item");
+      if (item) pickSuggestion(filtered[+item.dataset.idx].value);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".input-wrap")) suggestionsEl.classList.remove("open");
+    });
+
+    // ── Form submit ───────────────────────────────────────────────────────────
+    const form = document.getElementById("analyze-form");
+    const submitBtn = document.getElementById("submit-btn");
+    const loadingEl = document.getElementById("loading");
+    const errorBanner = document.getElementById("error-banner");
+    const resultsEl = document.getElementById("results");
+
+    const steps = {
+      scrape: document.getElementById("step-scrape"),
+      report: document.getElementById("step-report"),
+      box:    document.getElementById("step-box"),
+    };
+
+    function setStep(name) {
+      const order = ["scrape", "report", "box"];
+      const idx = order.indexOf(name);
+      order.forEach((s, i) => {
+        steps[s].className = "step" + (i < idx ? " done" : i === idx ? " active" : "");
+      });
+    }
+
+    function showError(msg) {
+      errorBanner.textContent = "Error: " + msg;
+      errorBanner.style.display = "block";
+    }
+
+    function resetUI() {
+      submitBtn.style.display = "";
+      loadingEl.style.display = "none";
+      errorBanner.style.display = "none";
+      submitBtn.disabled = false;
+      Object.values(steps).forEach(s => s.className = "step");
+    }
+
+    function renderMarkdown(text) {
+      return text
+        .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+        .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+        .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>")
+        .replace(/\n/g, "<br/>");
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorBanner.style.display = "none";
+      resultsEl.style.display = "none";
+
+      const location     = locationInput.value.trim();
+      const businessType = document.getElementById("business-type").value.trim();
+      const dayOfWeek    = document.getElementById("day-of-week").value;
+      const openingTime  = document.getElementById("opening-time").value;
+      const closingTime  = document.getElementById("closing-time").value;
+
+      submitBtn.style.display = "none";
+      loadingEl.style.display = "flex";
+      setStep("scrape");
+
+      const stepTimer1 = setTimeout(() => setStep("report"), 4000);
+      const stepTimer2 = setTimeout(() => setStep("box"), 9000);
+
+      const body = { location, business_type: businessType };
+      if (dayOfWeek) body.day_of_week = dayOfWeek;
+      if (openingTime) body.opening_time = openingTime;
+      if (closingTime) body.closing_time = closingTime;
+
+      try {
+        const res = await fetch(`${API_BASE}/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        clearTimeout(stepTimer1);
+        clearTimeout(stepTimer2);
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+
+        Object.values(steps).forEach(s => s.className = "step done");
+        await new Promise(r => setTimeout(r, 600));
+
+        loadingEl.style.display = "none";
+        submitBtn.style.display = "";
+
+        document.getElementById("report-meta").innerHTML = [
+          `<span class="tag">📍 ${data.location}</span>`,
+          `<span class="tag">🏪 ${data.business_type}</span>`,
+        ].join("");
+
+        document.getElementById("report-preview").innerHTML =
+          renderMarkdown(data.report_preview || "Report generated successfully.");
+
+        document.getElementById("box-link").href = data.box_link;
+
+        resultsEl.style.display = "block";
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      } catch (err) {
+        clearTimeout(stepTimer1);
+        clearTimeout(stepTimer2);
+        resetUI();
+        showError(err.message);
+      }
+    });
+
+    document.getElementById("btn-again").addEventListener("click", () => {
+      resultsEl.style.display = "none";
+      form.reset();
+      document.getElementById("opening-time").value = "09:00";
+      document.getElementById("closing-time").value = "17:00";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  </script>
+</body>
+</html>

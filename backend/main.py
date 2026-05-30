@@ -23,6 +23,9 @@ class AnalyzeRequest(BaseModel):
     business_type: str     # "coffee shop", "gym", "restaurant", etc.
     lat: Optional[float] = None
     lng: Optional[float] = None
+    day_of_week: Optional[str] = None      # e.g. "Monday"
+    opening_time: Optional[str] = None     # e.g. "09:00"
+    closing_time: Optional[str] = None     # e.g. "17:00"
 
 
 class AnalyzeResponse(BaseModel):
@@ -46,6 +49,9 @@ async def analyze(req: AnalyzeRequest):
             business_type=req.business_type,
             lat=req.lat,
             lng=req.lng,
+            day_of_week=req.day_of_week,
+            opening_time=req.opening_time,
+            closing_time=req.closing_time,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Scraper error: {e}")

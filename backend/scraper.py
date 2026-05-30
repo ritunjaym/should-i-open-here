@@ -31,13 +31,27 @@ async def scrape_location(
     business_type: str,
     lat: Optional[float] = None,
     lng: Optional[float] = None,
+    day_of_week: Optional[str] = None,
+    opening_time: Optional[str] = None,
+    closing_time: Optional[str] = None,
 ) -> dict:
     if USE_MOCK:
-        return _mock_scrape(location, business_type, lat, lng)
+        data = _mock_scrape(location, business_type, lat, lng)
+        # Stash optional fields so report_agent_real can use them
+        if day_of_week:
+            data["day_of_week"] = day_of_week
+        if opening_time:
+            data["opening_time"] = opening_time
+        if closing_time:
+            data["closing_time"] = closing_time
+        return data
 
-    # swap in Person A's real implementation
     from scraper_real import scrape as real_scrape  # noqa: PLC0415
-    return await real_scrape(location, business_type, lat, lng)
+    return await real_scrape(
+        location, business_type, lat, lng,
+        opening_time=opening_time or "09:00",
+        closing_time=closing_time or "22:00",
+    )
 
 
 def _mock_scrape(location, business_type, lat, lng) -> dict:
