@@ -91,10 +91,12 @@ def _scrape_sync(
 
     competitors = [
         {
-            "name": p.get("title", "Unknown"),
-            "distance_m": 0,        # Apify doesn't return distance directly
-            "rating": p.get("totalScore") or 0.0,
+            "name":         p.get("title", "Unknown"),
+            "distance_m":   0,
+            "rating":       p.get("totalScore") or 0.0,
             "review_count": p.get("reviewsCount") or 0,
+            "categories":   p.get("categories") or [],
+            "openingHours": p.get("openingHours") or [],
         }
         for p in filtered_places
     ]

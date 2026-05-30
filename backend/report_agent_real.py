@@ -61,8 +61,8 @@ def _generate_sync(scrape_data: dict) -> str:
                 "address":      "",
                 "totalScore":   c.get("rating", 0.0),
                 "reviewsCount": c.get("review_count", 0),
-                "categories":   [scrape_data.get("business_type", "")],
-                "openingHours": [],
+                "categories":   c.get("categories") or [scrape_data.get("business_type", "")],
+                "openingHours": c.get("openingHours") or [],
             }
             for i, c in enumerate(scrape_data.get("competitors", []))
         ]
