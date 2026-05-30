@@ -32,6 +32,9 @@ explicitly (it measures road segments, not people). Be honest about what can and
 be inferred.
 
 ## Recommended Hours
+If `traffic_coverage_note` in the signals is non-null, open this section by stating the \
+coverage limitation verbatim (e.g. "Traffic data covers 11:00–16:00 only; the recommendation \
+below applies to that window"). Do not imply analysis of hours outside the covered range.
 State the recommended opening and closing times. Justify them from the per-hour activity \
 ranking and competitor coverage gaps in the signals. Call out specific counter-programming \
 opportunities — hours when a meaningful share of nearby competitors are closed.

@@ -103,25 +103,40 @@ def _parse_hour_int(val) -> Optional[int]:
 
 
 def _parse_hour_12(time_str: str) -> Optional[int]:
-    """Parse '11 AM', '10 PM', '8:30 AM' → integer hour (0–23)."""
+    """
+    Parse a time string → integer hour (0–23).
+    Handles: '11 AM', '10 PM', '8:30 AM', '3 PM', and ambiguous '4:30' (no AM/PM).
+    Ambiguous hours 1–6 without an AM/PM marker are treated as PM (restaurant heuristic).
+    """
     s = time_str.strip()
     m = re.match(r"(\d{1,2})(?::(\d{2}))?\s*(AM|PM)", s, re.IGNORECASE)
-    if not m:
-        return None
-    h = int(m.group(1))
-    if m.group(3).upper() == "PM" and h != 12:
-        h += 12
-    elif m.group(3).upper() == "AM" and h == 12:
-        h = 0
-    return h
+    if m:
+        h = int(m.group(1))
+        if m.group(3).upper() == "PM" and h != 12:
+            h += 12
+        elif m.group(3).upper() == "AM" and h == 12:
+            h = 0
+        return h
+    # No AM/PM marker — bare hour or H:MM (e.g. the second segment of a split range).
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?$", s)
+    if m:
+        h = int(m.group(1))
+        if 0 < h < 7:   # '4:30', '5' → almost certainly afternoon in a restaurant context
+            h += 12
+        return h
+    return None
 
 
 def _parse_opening_hours_for_day(
     opening_hours: list, day: str
-) -> tuple[Optional[int], Optional[int]]:
-    """Return (open_hour, close_hour) for the given day, or (None, None) if unavailable/closed."""
+) -> list[tuple[int, int]]:
+    """
+    Return a list of (open_h, close_h) tuples for the given day.
+    Handles: single range, comma-split ranges ('11:30 AM to 3 PM, 4:30 to 9 PM'),
+    'Closed', and missing entries.  Returns [] if closed or no data found.
+    """
     if not opening_hours:
-        return None, None
+        return []
     day_lower = day.lower()
     for entry in opening_hours:
         if not isinstance(entry, dict):
@@ -130,12 +145,36 @@ def _parse_opening_hours_for_day(
             continue
         hours_str = str(entry.get("hours", "")).strip()
         if not hours_str or "closed" in hours_str.lower():
-            return None, None
-        parts = re.split(r"\s+to\s+", hours_str, maxsplit=1, flags=re.IGNORECASE)
-        if len(parts) != 2:
-            return None, None
-        return _parse_hour_12(parts[0]), _parse_hour_12(parts[1])
-    return None, None
+            return []
+        ranges: list[tuple[int, int]] = []
+        for segment in hours_str.split(","):
+            parts = re.split(r"\s+to\s+", segment.strip(), maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) != 2:
+                continue
+            open_h = _parse_hour_12(parts[0].strip())
+            close_h = _parse_hour_12(parts[1].strip())
+            if open_h is not None and close_h is not None:
+                ranges.append((open_h, close_h))
+        return ranges
+    return []
+
+
+def _is_open_at_hour(ranges: list[tuple[int, int]], h: int) -> bool:
+    """True if hour h falls within any of the (open_h, close_h) ranges (cross-midnight safe)."""
+    for open_h, close_h in ranges:
+        effective_close = close_h if close_h > open_h else close_h + 24
+        if open_h <= h < effective_close:
+            return True
+    return False
+
+
+def _format_ranges(ranges: list[tuple[int, int]]) -> str:
+    """Format a list of hour ranges as a human-readable string, e.g. '11:00–15:00, 16:30–21:00'."""
+    parts = []
+    for open_h, close_h in ranges:
+        display_close = close_h if close_h > open_h else close_h + 24
+        parts.append(f"{open_h:02d}:00–{display_close:02d}:00")
+    return ", ".join(parts) if parts else "Unknown"
 
 
 # ── Traffic helpers ───────────────────────────────────────────────────────────
@@ -303,26 +342,35 @@ def compute_signals(
     window_hours = list(range(window_open, window_close))
     available_hours = {h: hourly_scores[h] for h in window_hours if h in hourly_scores}
 
+    # ── Traffic coverage ──────────────────────────────────────────────────────
+    covered_hours = sorted(available_hours.keys())
+    if covered_hours and set(covered_hours) == set(window_hours):
+        traffic_coverage_note = None
+    elif covered_hours:
+        traffic_coverage_note = (
+            f"Traffic data covers {covered_hours[0]:02d}:00–{covered_hours[-1] + 1:02d}:00 only. "
+            f"Hours {covered_hours[-1] + 1:02d}:00–{window_close:02d}:00 have no traffic data; "
+            f"activity scores and hour recommendations reflect only the covered range."
+        )
+    else:
+        traffic_coverage_note = (
+            "No traffic data falls within the stated operating window. "
+            "Activity scores and hour recommendations are unavailable."
+        )
+
     # ── Competitor open/close distribution ────────────────────────────────────
     competitor_hours_that_day: list[dict] = []
     open_at_hour: dict[int, int] = {h: 0 for h in window_hours}
 
     for comp in competitors:
-        open_h, close_h = _parse_opening_hours_for_day(
-            comp.get("openingHours", []), day
-        )
+        ranges = _parse_opening_hours_for_day(comp.get("openingHours", []), day)
         competitor_hours_that_day.append({
             "name": comp.get("title", "Unknown"),
-            "open_hour": open_h,
-            "close_hour": close_h,
+            "hours_today": _format_ranges(ranges) if ranges else "Closed / unknown",
         })
-        if open_h is not None and close_h is not None:
-            # Cross-midnight handling: "11 AM to 12 AM" → close_hour=0 < open_hour=11.
-            # Treat as close_hour+24 so the comparison stays valid within a 0–47 range.
-            effective_close = close_h if close_h > open_h else close_h + 24
-            for h in window_hours:
-                if open_h <= h < effective_close:
-                    open_at_hour[h] += 1
+        for h in window_hours:
+            if _is_open_at_hour(ranges, h):
+                open_at_hour[h] += 1
 
     total_comps = len(competitors) or 1
     competitor_open_fraction: dict[int, float] = {
@@ -331,9 +379,9 @@ def compute_signals(
 
     ranked_hours = [h for h, _ in sorted(available_hours.items(), key=lambda x: -x[1])]
 
-    # ── Recommended hours ─────────────────────────────────────────────────────
+    # ── Recommended hours (constrained to traffic-covered hours only) ─────────
     rec_open, rec_close, rec_rationale = _find_recommended_hours(
-        available_hours, competitor_open_fraction, window_hours
+        available_hours, competitor_open_fraction, covered_hours   # ← covered_hours, not window_hours
     )
 
     # ── Accessibility note ────────────────────────────────────────────────────
@@ -389,6 +437,8 @@ def compute_signals(
             "min_rating": STRONG_INCUMBENT_MIN_RATING,
             "min_reviews": STRONG_INCUMBENT_MIN_REVIEWS,
         },
+        "traffic_covered_hours": covered_hours,
+        "traffic_coverage_note": traffic_coverage_note,
         "hourly_activity_scores": {
             str(h): round(s, 4) for h, s in sorted(available_hours.items())
         },
